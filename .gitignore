@@ -1,0 +1,12 @@
+node_modules/
+dist/
+release/
+tmp_review*/
+tmp_review_test*/
+tmp-renders*/
+tmp_pdfkit_review/
+*.exe
+*.zip
+*.log
+.env
+.env.local
