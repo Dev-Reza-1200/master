@@ -305,7 +305,7 @@ function newReport(): Report {
   }
 }
 
-function normalizeReport(report: Partial<Report> | null): Report {
+export function normalizeReport(report: Partial<Report> | null): Report {
   const base = newReport()
   if (!report) return base
   const normalized: Report = {
@@ -1123,7 +1123,7 @@ function cleanEvaluatorSummary(text: string, posturalObservations = '') {
   return cleanImportedText(clean.slice(0, inquiryStart === -1 ? undefined : inquiryStart))
 }
 
-function parseImportedRecommendations(text: string) {
+export function parseImportedRecommendations(text: string) {
   const section = textBetweenImportedMarkers(
     text,
     /VI\.\s+ERGONOMIC\s+EQUIPMENT\s+RECOMMENDATION/i,
@@ -1207,7 +1207,7 @@ function parseImportedRecommendations(text: string) {
 }
 
 
-function autofillReportFromSource(current: Report, sourceDocument: ImportedSourceDocument, warning?: string) {
+export function autofillReportFromSource(current: Report, sourceDocument: ImportedSourceDocument, warning?: string) {
   const text = cleanImportedText(sourceDocument.text || '')
   const lines = importedLines(text)
   const next: Report = normalizeReport({
@@ -1439,6 +1439,11 @@ function App() {
     setStatus(`Attached ${file.name}`)
   }
 
+  function deletePhoto(exhibitIndex: number, side: PhotoSide) {
+    updateExhibit(exhibitIndex, side === 'pre' ? { pre: undefined } : { post: undefined })
+    setStatus('Photo removed')
+  }
+
   async function attachSignature(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     event.target.value = ''
@@ -1569,6 +1574,7 @@ function App() {
           updateRecommendation={updateRecommendation}
           updateExhibit={updateExhibit}
           attachPhoto={attachPhoto}
+          deletePhoto={deletePhoto}
           attachSignature={attachSignature}
         />
         <p className="status">{status}</p>
@@ -1589,10 +1595,11 @@ type EditorProps = {
   updateRecommendation: (index: number, key: keyof EquipmentRow, value: string) => void
   updateExhibit: (index: number, patch: Partial<Exhibit>) => void
   attachPhoto: (event: ChangeEvent<HTMLInputElement>, exhibitIndex: number, side: PhotoSide) => void
+  deletePhoto: (exhibitIndex: number, side: PhotoSide) => void
   attachSignature: (event: ChangeEvent<HTMLInputElement>) => void
 }
 
-function Editor({ report, update, toggleList, toggleJustification, updateRecommendation, updateExhibit, attachPhoto, attachSignature }: EditorProps) {
+export function Editor({ report, update, toggleList, toggleJustification, updateRecommendation, updateExhibit, attachPhoto, deletePhoto, attachSignature }: EditorProps) {
   const adminFields: [keyof Report, string][] = [
     ['claimNumber', 'Case / Claim #'],
     ['employeeName', 'Employee name'],
@@ -1697,8 +1704,24 @@ function Editor({ report, update, toggleList, toggleJustification, updateRecomme
         {report.exhibits.map((exhibit, index) => (
           <div className="photo-editor" key={index}>
             <strong>Exhibit {index + 1}</strong>
-            <label><Camera size={15} /> Pre photo<input type="file" accept="image/*" onChange={(event) => attachPhoto(event, index, 'pre')} /></label>
-            <label><Camera size={15} /> Corrective photo<input type="file" accept="image/*" onChange={(event) => attachPhoto(event, index, 'post')} /></label>
+            <div className="photo-field">
+              <label><Camera size={15} /> Pre photo<input type="file" accept="image/*" onChange={(event) => attachPhoto(event, index, 'pre')} /></label>
+              {exhibit.pre && (
+                <div className="photo-thumb-row">
+                  <img className="photo-thumb" src={exhibit.pre.url} alt={exhibit.pre.name} />
+                  <button type="button" className="photo-delete" title="Remove photo" onClick={() => deletePhoto(index, 'pre')}>×</button>
+                </div>
+              )}
+            </div>
+            <div className="photo-field">
+              <label><Camera size={15} /> Corrective photo<input type="file" accept="image/*" onChange={(event) => attachPhoto(event, index, 'post')} /></label>
+              {exhibit.post && (
+                <div className="photo-thumb-row">
+                  <img className="photo-thumb" src={exhibit.post.url} alt={exhibit.post.name} />
+                  <button type="button" className="photo-delete" title="Remove photo" onClick={() => deletePhoto(index, 'post')}>×</button>
+                </div>
+              )}
+            </div>
             <textarea placeholder="Analysis" value={exhibit.analysis} onChange={(event) => updateExhibit(index, { analysis: event.target.value })} />
             <LongTextWarning text={exhibit.analysis} limit={exhibitAnalysisRecommendedLimit} />
           </div>
@@ -1780,7 +1803,7 @@ type PhotoPlanItem =
   | { type: 'photo'; exhibits: PlannedExhibit[]; section: string }
   | { type: 'continuation'; exhibitNumber: number; chunks: string[] }
 
-function buildPhotoPlan(exhibits: Exhibit[]): PhotoPlanItem[] {
+export function buildPhotoPlan(exhibits: Exhibit[]): PhotoPlanItem[] {
   const plan: PhotoPlanItem[] = []
   let isFirstPhotoPage = true
 

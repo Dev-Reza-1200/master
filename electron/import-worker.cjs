@@ -92,7 +92,37 @@ async function getPdfVisualLines(page) {
     .sort((a, b) => b.y - a.y)
 }
 
-function pngBufferFromPdfImage(image) {
+function rotatePng90CW(src, srcW, srcH) {
+  const dst = new PNG({ width: srcH, height: srcW })
+  for (let outRow = 0; outRow < srcW; outRow += 1) {
+    for (let outCol = 0; outCol < srcH; outCol += 1) {
+      const srcIdx = ((srcH - 1 - outCol) * srcW + outRow) * 4
+      const dstIdx = (outRow * srcH + outCol) * 4
+      dst.data[dstIdx] = src.data[srcIdx]
+      dst.data[dstIdx + 1] = src.data[srcIdx + 1]
+      dst.data[dstIdx + 2] = src.data[srcIdx + 2]
+      dst.data[dstIdx + 3] = src.data[srcIdx + 3]
+    }
+  }
+  return PNG.sync.write(dst)
+}
+
+function rotatePng90CCW(src, srcW, srcH) {
+  const dst = new PNG({ width: srcH, height: srcW })
+  for (let outRow = 0; outRow < srcW; outRow += 1) {
+    for (let outCol = 0; outCol < srcH; outCol += 1) {
+      const srcIdx = (outCol * srcW + (srcW - 1 - outRow)) * 4
+      const dstIdx = (outRow * srcH + outCol) * 4
+      dst.data[dstIdx] = src.data[srcIdx]
+      dst.data[dstIdx + 1] = src.data[srcIdx + 1]
+      dst.data[dstIdx + 2] = src.data[srcIdx + 2]
+      dst.data[dstIdx + 3] = src.data[srcIdx + 3]
+    }
+  }
+  return PNG.sync.write(dst)
+}
+
+function pngBufferFromPdfImage(image, rotationDeg = 0) {
   const width = image.width
   const height = image.height
   const data = image.data
@@ -133,6 +163,9 @@ function pngBufferFromPdfImage(image) {
     }
   }
 
+  const snap = ((Math.round(rotationDeg / 90) * 90) % 360 + 360) % 360
+  if (snap === 270) return rotatePng90CW(png, outputWidth, outputHeight)
+  if (snap === 90) return rotatePng90CCW(png, outputWidth, outputHeight)
   return PNG.sync.write(png)
 }
 
@@ -162,7 +195,8 @@ async function extractPdfImagesFromPage(page) {
 
       const image = await new Promise((resolve) => page.objs.get(name, resolve))
       if (!image || image.width < 120 || image.height < 100) continue
-      candidates.push({ name, x: ctm[4], y: ctm[5], displayWidth, displayHeight, image })
+      const rotationDeg = Math.round(Math.atan2(ctm[1], ctm[0]) * 180 / Math.PI / 90) * 90
+      candidates.push({ name, x: ctm[4], y: ctm[5], displayWidth, displayHeight, image, rotationDeg })
     }
   }
 
@@ -211,7 +245,7 @@ async function extractPdfVisualData(filePath, buffer, userData) {
           const key = `${exhibitNumber}-${side}`
           if (assigned.has(key)) return
 
-          const png = pngBufferFromPdfImage(candidate.image)
+          const png = pngBufferFromPdfImage(candidate.image, candidate.rotationDeg)
           if (!png) return
 
           const fileName = `${Date.now()}-${crypto.randomUUID()}-${safeStem}-exhibit-${exhibitNumber}-${side}.png`
@@ -237,7 +271,7 @@ async function extractPdfVisualData(filePath, buffer, userData) {
         .filter((c) => c.image.width > 200 && c.image.height > 50)
         .sort((a, b) => b.image.width * b.image.height - a.image.width * a.image.height)[0]
       if (sigCandidate) {
-        const png = pngBufferFromPdfImage(sigCandidate.image)
+        const png = pngBufferFromPdfImage(sigCandidate.image, sigCandidate.rotationDeg)
         if (png) {
           const fileName = `${Date.now()}-${crypto.randomUUID()}-${safeStem}-signature.png`
           const photoPath = path.join(photoDir, fileName)
