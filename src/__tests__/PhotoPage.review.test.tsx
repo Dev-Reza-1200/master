@@ -1,7 +1,8 @@
-import React from 'react'
-import { render, screen } from '@testing-library/react'
-import { describe, it, expect } from 'vitest'
+import { render, screen, cleanup } from '@testing-library/react'
+import { describe, it, expect, afterEach } from 'vitest'
 import { PhotoPage } from '../main'
+
+afterEach(() => cleanup())
 
 describe('PhotoPage - review tests', () => {
   it('renders both pre and post photos with labels and two images', () => {

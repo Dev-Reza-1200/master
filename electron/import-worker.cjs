@@ -155,8 +155,9 @@ async function extractPdfImagesFromPage(page) {
       ctm = multiplyMatrix(ctm, args)
     } else if (fn === OPS.paintImageXObject || fn === OPS.paintJpegXObject || fn === OPS.paintInlineImageXObject) {
       const name = args[0]
-      const displayWidth = Math.abs(ctm[0])
-      const displayHeight = Math.abs(ctm[3])
+      // Use Euclidean magnitude so rotated images (ctm[0]=0, ctm[3]=0) are not missed.
+      const displayWidth = Math.sqrt(ctm[0] * ctm[0] + ctm[1] * ctm[1])
+      const displayHeight = Math.sqrt(ctm[2] * ctm[2] + ctm[3] * ctm[3])
       if (displayWidth < 90 || displayHeight < 70) continue
 
       const image = await new Promise((resolve) => page.objs.get(name, resolve))
@@ -177,6 +178,7 @@ async function extractPdfVisualData(filePath, buffer, userData) {
   const exhibitPhotos = []
   const assigned = new Set()
   let carryExhibitNumber = null
+  let signaturePhoto = null
   const safeStem = path.parse(filePath).name.replace(/[^a-z0-9-_]+/gi, '-').slice(0, 50) || 'imported-pdf'
 
   for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber += 1) {
@@ -228,11 +230,32 @@ async function extractPdfVisualData(filePath, buffer, userData) {
         })
     }
 
+    const isCertificationPage = !signaturePhoto && /Secure Electronic Signature Block/i.test(pageText)
+    if (isCertificationPage) {
+      const images = await extractPdfImagesFromPage(page)
+      const sigCandidate = images
+        .filter((c) => c.image.width > 200 && c.image.height > 50)
+        .sort((a, b) => b.image.width * b.image.height - a.image.width * a.image.height)[0]
+      if (sigCandidate) {
+        const png = pngBufferFromPdfImage(sigCandidate.image)
+        if (png) {
+          const fileName = `${Date.now()}-${crypto.randomUUID()}-${safeStem}-signature.png`
+          const photoPath = path.join(photoDir, fileName)
+          fs.writeFileSync(photoPath, png)
+          signaturePhoto = {
+            name: 'Electronic signature',
+            path: photoPath,
+            url: `file://${photoPath.replace(/\\/g, '/')}`,
+          }
+        }
+      }
+    }
+
     if (headers.length) carryExhibitNumber = headers[headers.length - 1].number
     await new Promise((resolve) => setImmediate(resolve))
   }
 
-  return { text: visualPages.join('\n\n').trim(), exhibitPhotos }
+  return { text: visualPages.join('\n\n').trim(), exhibitPhotos, signaturePhoto }
 }
 
 function plainTextFromRtf(text) {
@@ -299,6 +322,7 @@ async function buildImportedSourceDocument(filePath, userData) {
   const storedPath = copyImportedFile(filePath, userData)
   let extractedText = ''
   let exhibitPhotos = []
+  let signaturePhoto = null
   let extractionStatus = 'No readable text was extracted from this file.'
 
   const importedData = await extractImportedDocumentData(filePath, buffer, userData)
@@ -310,6 +334,10 @@ async function buildImportedSourceDocument(filePath, userData) {
     extractionStatus += ` Imported ${importedData.exhibitPhotos.length} exhibit photo${importedData.exhibitPhotos.length === 1 ? '' : 's'}.`
   }
   exhibitPhotos = importedData.exhibitPhotos || []
+  if (importedData.signaturePhoto) {
+    signaturePhoto = importedData.signaturePhoto
+    extractionStatus += ' Imported electronic signature.'
+  }
 
   return {
     name: path.basename(filePath),
@@ -321,6 +349,7 @@ async function buildImportedSourceDocument(filePath, userData) {
     text: extractedText,
     extractionStatus,
     exhibitPhotos,
+    signaturePhoto,
   }
 }
 

@@ -29,7 +29,7 @@ const dataSources = [
 ]
 
 const assessmentTools = ['RULA', 'REBA', 'ROSA', 'NIOSH']
-const benchmarks = ['ANSI/HFES 100-2007', 'Cal/OSHA Title 8 5110']
+const benchmarks = ['ANSI/HFES 100-2007', 'Cal/OSHA Title 8 §5110']
 const controls = ['Micro-Breaks', 'Software', 'Self-Adjustment']
 const softwareOptions = ['RSI Guard', 'Auto-Click', 'Keyboard Shortcuts']
 
@@ -80,7 +80,7 @@ function sanitizePdfText(text) {
     .replace(/[\u201c\u201d]/g, '"')
     .replace(/[\u2010\u2011\u2012\u2013\u2014]/g, '-')
     .replace(/\u2026/g, '...')
-    .replace(/[^\x20-\x7E\n]/g, ' ')
+    .replace(/[^\x20-\x7E\n§]/g, ' ')
 }
 
 function cleanText(text) {

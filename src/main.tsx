@@ -47,6 +47,7 @@ type ImportedSourceDocument = {
     side: PhotoSide
     photo: PhotoSlot
   }>
+  signaturePhoto?: PhotoSlot
 }
 
 type Exhibit = {
@@ -1132,17 +1133,32 @@ function parseImportedRecommendations(text: string) {
 
   const lines = importedLines(section)
   const blocks: string[][] = []
-  let currentBlock: string[] = []
 
-  lines.forEach((line) => {
-    if (/^Equipment Recommendation\s*$/i.test(line)) {
-      if (currentBlock.length) blocks.push(currentBlock)
-      currentBlock = []
-      return
-    }
-    currentBlock.push(line)
-  })
-  if (currentBlock.length) blocks.push(currentBlock)
+  // Primary: each card's first field is "Model / SKU" — the line before it is the category+priority
+  const modelIndices = lines.reduce<number[]>((acc, line, i) => {
+    if (/^(?:Model\s*\/\s*SKU|Product\s*\/\s*model)\s*$/i.test(line)) acc.push(i)
+    return acc
+  }, [])
+
+  if (modelIndices.length) {
+    modelIndices.forEach((modelIndex, i) => {
+      const start = modelIndex > 0 ? modelIndex - 1 : modelIndex
+      const end = i + 1 < modelIndices.length ? modelIndices[i + 1] - 1 : lines.length
+      blocks.push(lines.slice(start, end))
+    })
+  } else {
+    // Legacy: split on standalone "Equipment Recommendation" label (empty category)
+    let currentBlock: string[] = []
+    lines.forEach((line) => {
+      if (/^Equipment Recommendation\s*$/i.test(line)) {
+        if (currentBlock.length) blocks.push(currentBlock)
+        currentBlock = []
+        return
+      }
+      currentBlock.push(line)
+    })
+    if (currentBlock.length) blocks.push(currentBlock)
+  }
 
   const sourceBlocks = blocks.length ? blocks : section.split(/Equipment Recommendation/i).slice(1).map(importedLines)
 
@@ -1228,9 +1244,23 @@ function autofillReportFromSource(current: Report, sourceDocument: ImportedSourc
   assign('idealKeyingHeight', valueFromImportedText(text, 'Ideal Keying Hgt', ['Delta', 'B. Postural Deviation Matrix']) || parseInlineValue(text, 'Ideal Keying Hgt', ['Delta']))
   assign('delta', valueFromImportedText(text, 'Delta', ['B. Postural Deviation Matrix', 'Postural Deviation Matrix', 'Risk Level', 'Body Segment']) || parseInlineValue(text, 'Delta', ['B. Postural Deviation Matrix', 'Postural Deviation Matrix', 'Risk Level', 'Body Segment']))
 
+  // In visually-extracted PDFs the signed measurement (e.g. "+8"") can appear above the
+  // label row, leaving only the descriptive caption after "Delta:" in the one-line parse.
+  // If the imported value contains no digit, recover the number from the nearby region.
+  if (!/\d/.test(next.delta || '')) {
+    const anthropRegion = textBetweenImportedMarkers(
+      text,
+      /Desk\s+Type\b/i,
+      /B\.\s+Postural\s+Deviation\s+Matrix/i,
+    )
+    const numericDelta = /([+-]\d+(?:\.\d+)?[^\s,\n(]?)/.exec(anthropRegion)?.[1]
+    if (numericDelta) next.delta = numericDelta
+  }
+
   next.dataSources = mergeUnique(dataSources.filter((value) => text.includes(value)))
   next.assessmentTools = mergeUnique(assessmentTools.filter((value) => text.includes(value)))
-  next.benchmarks = mergeUnique(benchmarks.filter((value) => text.includes(value)))
+  next.benchmarks = mergeUnique(benchmarks.filter((value) => text.includes(value) || normalizeLookup(text).includes(normalizeLookup(value))))
+  next.controls = mergeUnique(controls.filter((value) => text.includes(value)))
 
   const riskMap: Array<[string, string, string]> = [
     ['neck', 'Neck / Head', 'Shoulders'],
@@ -1248,7 +1278,24 @@ function autofillReportFromSource(current: Report, sourceDocument: ImportedSourc
     /Postural Observations(?: Continued)?:/i,
     /IV\.\s+EVIDENTIARY\s+DOCUMENTATION/i,
   )
-  const importedPosturalObservations = dedupeRepeatedSentences(cleanImportedSection(posturalObservations))
+  // cleanImportedSection filters /^\d+\.\s*[A-Z]/ which strips numbered observation lists,
+  // so use a lighter clean that only removes section navigation artifacts
+  const importedPosturalObservations = dedupeRepeatedSentences(
+    cleanImportedText(posturalObservations)
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => {
+        if (!line) return false
+        if (/^[ivx]+\.\s+/i.test(line)) return false
+        if (/^Postural Observations(?: Continued)?:?\s*$/i.test(line)) return false
+        if (/^ERGONOMIC EVALUATION REPORT$/i.test(line)) return false
+        if (/^Professional Ergonomic Assessment$/i.test(line)) return false
+        return true
+      })
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim(),
+  )
   assign('posturalObservations', importedPosturalObservations)
 
   next.exhibits = next.exhibits.map((exhibit, index) => {
@@ -1263,6 +1310,11 @@ function autofillReportFromSource(current: Report, sourceDocument: ImportedSourc
     return { ...exhibit, ...sourcePhotoPatch, ...(analysis ? { analysis } : {}) }
   })
 
+  if (sourceDocument.signaturePhoto && !next.signature) {
+    next.signature = sourceDocument.signaturePhoto
+    filledCount += 1
+  }
+
   const recommendations = parseImportedRecommendations(text)
   if (recommendations.length) {
     next.recommendations = next.recommendations.map((row, index) => recommendations[index] || row)
@@ -1274,16 +1326,29 @@ function autofillReportFromSource(current: Report, sourceDocument: ImportedSourc
     exactHeading('Editable Clinical Justification Display'),
     /VI\.\s+ERGONOMIC\s+EQUIPMENT\s+RECOMMENDATION/i,
   )))
+  if (next.justificationDisplay) {
+    next.justifications = justifications.filter((title) => next.justificationDisplay.includes(`${title}:`))
+    if (next.justifications.length) filledCount += 1
+  }
   assign('procurementSummary', formatProcurementSummary(removeImportedSectionOverlap(cleanImportedSection(textBetweenImportedMarkers(
     text,
     /Procurement Notes\s*&\s*Justification Summary/i,
     /VII\.\s+OPINION\s*&\s*PROFESSIONAL\s+CERTIFICATION/i,
   )), importedPosturalObservations || next.posturalObservations)))
-  assign('evaluatorSummary', cleanEvaluatorSummary(textBetweenImportedMarkers(
+  const mainEvalSummary = textBetweenImportedMarkers(
     text,
     exactHeading('Evaluator Summary'),
     /Evaluator Name/i,
-  ), importedPosturalObservations || next.posturalObservations))
+  )
+  const contEvalSummary = textBetweenImportedMarkers(
+    text,
+    /(?:^|\n)\s*Evaluator Summary Continued\s*(?:\n|$)/i,
+    /Inquiries\s*&\s*Correspondence|This\s+report\s+was\s+prepared\b/i,
+  )
+  assign('evaluatorSummary', cleanEvaluatorSummary(
+    [mainEvalSummary, contEvalSummary].filter(Boolean).join('\n\n'),
+    importedPosturalObservations || next.posturalObservations,
+  ))
   assign('evaluatorName', valueAfterImportedLabel(lines, ['Evaluator Name', 'Evaluator Name (Printed)']))
 
   return { report: normalizeReport(sanitizeReportSectionBleed(next)), filledCount }
