@@ -1,6 +1,7 @@
 const fs = require('node:fs')
 const path = require('node:path')
 const crypto = require('node:crypto')
+const { pathToFileURL } = require('node:url')
 const pdfParse = require('pdf-parse')
 const pdfjsLib = require('pdfjs-dist/legacy/build/pdf.js')
 const mammoth = require('mammoth')
@@ -193,7 +194,10 @@ async function extractPdfImagesFromPage(page) {
       const displayHeight = Math.sqrt(ctm[2] * ctm[2] + ctm[3] * ctm[3])
       if (displayWidth < 90 || displayHeight < 70) continue
 
-      const image = await new Promise((resolve) => page.objs.get(name, resolve))
+      const image = await new Promise((resolve) => {
+        const timer = setTimeout(() => resolve(null), 6000)
+        page.objs.get(name, (obj) => { clearTimeout(timer); resolve(obj) })
+      })
       if (!image || image.width < 120 || image.height < 100) continue
       const rotationDeg = Math.round(Math.atan2(ctm[1], ctm[0]) * 180 / Math.PI / 90) * 90
       candidates.push({ name, x: ctm[4], y: ctm[5], displayWidth, displayHeight, image, rotationDeg })
@@ -258,7 +262,7 @@ async function extractPdfVisualData(filePath, buffer, userData) {
             photo: {
               name: `Exhibit ${exhibitNumber} ${side === 'pre' ? 'pre' : 'corrective'} photo`,
               path: photoPath,
-              url: `file://${photoPath.replace(/\\/g, '/')}`,
+              url: pathToFileURL(photoPath).href,
             },
           })
         })
@@ -292,10 +296,22 @@ async function extractPdfVisualData(filePath, buffer, userData) {
   return { text: visualPages.join('\n\n').trim(), exhibitPhotos, signaturePhoto }
 }
 
+const WIN1252 = {
+  0x80: '€', 0x82: '‚', 0x83: 'ƒ', 0x84: '„', 0x85: '…',
+  0x86: '†', 0x87: '‡', 0x88: 'ˆ', 0x89: '‰', 0x8A: 'Š',
+  0x8B: '‹', 0x8C: 'Œ', 0x8E: 'Ž', 0x91: '‘', 0x92: '’',
+  0x93: '“', 0x94: '”', 0x95: '•', 0x96: '–', 0x97: '—',
+  0x98: '˜', 0x99: '™', 0x9A: 'š', 0x9B: '›', 0x9C: 'œ',
+  0x9E: 'ž', 0x9F: 'Ÿ',
+}
+
 function plainTextFromRtf(text) {
   return text
     .replace(/\\par[d]?/g, '\n')
-    .replace(/\\'[0-9a-fA-F]{2}/g, ' ')
+    .replace(/\\'([0-9a-fA-F]{2})/g, (_, hex) => {
+      const code = parseInt(hex, 16)
+      return WIN1252[code] ?? Buffer.from([code]).toString('latin1')
+    })
     .replace(/[{}]/g, '')
     .replace(/\\[a-z]+\d* ?/gi, '')
     .replace(/\n{3,}/g, '\n\n')
@@ -376,7 +392,7 @@ async function buildImportedSourceDocument(filePath, userData) {
   return {
     name: path.basename(filePath),
     path: storedPath,
-    url: `file://${storedPath.replace(/\\/g, '/')}`,
+    url: pathToFileURL(storedPath).href,
     type: mimeForFile(filePath),
     extension: path.extname(filePath).toLowerCase(),
     importedAt: new Date().toISOString(),

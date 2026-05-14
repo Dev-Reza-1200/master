@@ -764,7 +764,7 @@ function trimInlineImportedValue(value: string) {
     'Assessment Mode',
   ]
   const escapedStops = inlineStopLabels.map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')
-  const stopPattern = new RegExp(`\\s+(?:${escapedStops})(?:\\s*:|\\b)`, 'i')
+  const stopPattern = new RegExp(`(?:^|\\s+)(?:${escapedStops})(?:\\s*:|\\b)`, 'i')
   const sectionStopPattern = /\s+(?:[IVX]+\.\s+[A-Z][A-Za-z0-9 &/()—-]+|[A-Z]\.\s+[A-Z][A-Za-z0-9 &/()—-]+).*$/i
   const brokenMatrixPattern = /\s+B\.\s*Po\s*stural[\s\S]*$/i
   const match = stopPattern.exec(value)
@@ -1350,6 +1350,7 @@ export function autofillReportFromSource(current: Report, sourceDocument: Import
     importedPosturalObservations || next.posturalObservations,
   ))
   assign('evaluatorName', valueAfterImportedLabel(lines, ['Evaluator Name', 'Evaluator Name (Printed)']))
+  if (next.evaluatorName && next.evaluatorName.length > 70) next.evaluatorName = ''
 
   return { report: normalizeReport(sanitizeReportSectionBleed(next)), filledCount }
 }

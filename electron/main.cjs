@@ -4,7 +4,7 @@ const fs = require('node:fs')
 const crypto = require('node:crypto')
 const os = require('node:os')
 const zlib = require('node:zlib')
-const { fileURLToPath } = require('node:url')
+const { fileURLToPath, pathToFileURL } = require('node:url')
 const { fork } = require('node:child_process')
 const AdmZip = require('adm-zip')
 const pdfParse = require('pdf-parse')
@@ -179,7 +179,7 @@ function optimizedPhoto(photo, maxSide = 1200) {
   return {
     name: photo.name || fileName,
     path: optimizedPath,
-    url: `file://${optimizedPath.replace(/\\/g, '/')}`,
+    url: pathToFileURL(optimizedPath).href,
   }
 }
 
@@ -468,7 +468,7 @@ async function extractPdfVisualData(filePath, buffer) {
             photo: {
               name: `Exhibit ${exhibitNumber} ${side === 'pre' ? 'pre' : 'corrective'} photo`,
               path: photoPath,
-              url: `file://${photoPath.replace(/\\/g, '/')}`,
+              url: pathToFileURL(photoPath).href,
             },
           })
         })
@@ -581,7 +581,7 @@ async function buildImportedSourceDocument(filePath) {
   return {
     name: path.basename(filePath),
     path: storedPath,
-    url: `file://${storedPath.replace(/\\/g, '/')}`,
+    url: pathToFileURL(storedPath).href,
     type: mimeForFile(filePath),
     extension: path.extname(filePath).toLowerCase(),
     importedAt: new Date().toISOString(),
@@ -598,31 +598,35 @@ function buildImportedSourceDocumentInWorker(filePath) {
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
       stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
     })
+
+    let settled = false
+    const settle = (fn, value) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      fn(value)
+    }
+
     const timeout = setTimeout(() => {
       worker.kill()
-      reject(new Error('Timed out while importing the selected file.'))
+      settle(reject, new Error('Timed out while importing the selected file.'))
     }, 120000)
 
     worker.once('message', (message) => {
-      clearTimeout(timeout)
       if (message?.ok) {
-        resolve(message.sourceDocument)
+        settle(resolve, message.sourceDocument)
       } else {
-        reject(new Error(message?.error || 'File import worker failed.'))
+        settle(reject, new Error(message?.error || 'File import worker failed.'))
       }
       worker.disconnect()
     })
 
     worker.once('error', (error) => {
-      clearTimeout(timeout)
-      reject(error)
+      settle(reject, error)
     })
 
     worker.once('exit', (code) => {
-      if (code && code !== 0) {
-        clearTimeout(timeout)
-        reject(new Error(`File import worker exited with code ${code}.`))
-      }
+      settle(reject, new Error(code ? `File import worker exited with code ${code}.` : 'File import worker exited unexpectedly.'))
     })
 
     worker.send({ filePath, userData: app.getPath('userData') })
@@ -874,7 +878,7 @@ ipcMain.handle('photos:save', (_event, photo) => {
   return {
     name: photo.name,
     path: filePath,
-    url: `file://${filePath.replace(/\\/g, '/')}`,
+    url: pathToFileURL(filePath).href,
   }
 })
 

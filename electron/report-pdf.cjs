@@ -80,7 +80,7 @@ function sanitizePdfText(text) {
     .replace(/[\u201c\u201d]/g, '"')
     .replace(/[\u2010\u2011\u2012\u2013\u2014]/g, '-')
     .replace(/\u2026/g, '...')
-    .replace(/[^\x20-\x7E\n§]/g, ' ')
+    .replace(/[^\x20-\x7E\n§°]/g, ' ')
 }
 
 function cleanText(text) {
@@ -1087,10 +1087,24 @@ class ReportPdfRenderer {
       'Under-Desk Keyboard tray',
     ]
     const found = known.filter((item) => text.toLowerCase().includes(item.toLowerCase()))
-    if (!found.length) return text
-    const intro = text.match(/^([\s\S]*?(?:configuration|recommended items)\s*:)/i)?.[1] || 'The recommended items for this ergonomic configuration:'
-    const closing = text.match(/These items can\b[\s\S]*$/i)?.[0] || ''
-    return [intro, ...found.map((item) => `- ${item}`), closing].filter(Boolean).join('\n')
+    if (found.length) {
+      const intro = text.match(/^([\s\S]*?(?:configuration|recommended items)\s*:)/i)?.[1] || 'The recommended items for this ergonomic configuration:'
+      const closing = text.match(/These items can\b[\s\S]*$/i)?.[0] || ''
+      return [intro, ...found.map((item) => `- ${item}`), closing].filter(Boolean).join('\n')
+    }
+    // Fall back to auto-generating bullets from the recommendations list
+    const recBullets = (this.report.recommendations || [])
+      .filter((r) => String(r.category || '').trim())
+      .map((r) => {
+        const cat = String(r.category || '').trim()
+        const current = String(r.current || '').trim()
+        return `- ${cat}${current ? ` — ${current}` : ''}`
+      })
+    if (recBullets.length) {
+      const introLine = text.match(/^[^\n-]+/)?.[0]?.trim() || 'Recommended Equipment'
+      return [introLine, ...recBullets].join('\n')
+    }
+    return text
   }
 
   drawProcurementSummary(text) {
