@@ -1257,9 +1257,23 @@ export function autofillReportFromSource(current: Report, sourceDocument: Import
     if (numericDelta) next.delta = numericDelta
   }
 
-  next.dataSources = mergeUnique(dataSources.filter((value) => text.includes(value)))
-  next.assessmentTools = mergeUnique(assessmentTools.filter((value) => text.includes(value)))
-  next.benchmarks = mergeUnique(benchmarks.filter((value) => text.includes(value) || normalizeLookup(text).includes(normalizeLookup(value))))
+  const importHintMatch = /ERGO_IMPORT_V1;([^\n]+)/.exec(text)
+  if (importHintMatch) {
+    const parts = Object.fromEntries(
+      importHintMatch[1].split(';').map((p) => {
+        const eq = p.indexOf('=')
+        return [p.slice(0, eq), p.slice(eq + 1)]
+      })
+    )
+    if (parts.mode) next.assessmentMode = parts.mode
+    next.dataSources = parts.src ? parts.src.split('|').filter(Boolean) : []
+    next.assessmentTools = parts.tools ? parts.tools.split('|').filter(Boolean) : []
+    next.benchmarks = parts.bench ? parts.bench.split('|').filter(Boolean) : []
+  } else {
+    next.dataSources = mergeUnique(dataSources.filter((value) => text.includes(value)))
+    next.assessmentTools = mergeUnique(assessmentTools.filter((value) => text.includes(value)))
+    next.benchmarks = mergeUnique(benchmarks.filter((value) => text.includes(value) || normalizeLookup(text).includes(normalizeLookup(value))))
+  }
   next.controls = mergeUnique(controls.filter((value) => text.includes(value)))
 
   const riskMap: Array<[string, string, string]> = [

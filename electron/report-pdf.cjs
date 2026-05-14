@@ -264,6 +264,7 @@ class ReportPdfRenderer {
   }
 
   render() {
+    this.doc.info.Keywords = `ERGO_IMPORT_V1;mode=${this.report.assessmentMode || ''};src=${(this.report.dataSources || []).join('|')};tools=${(this.report.assessmentTools || []).join('|')};bench=${(this.report.benchmarks || []).join('|')}`
     this.sectionI()
     this.sectionII()
     this.sectionIII()

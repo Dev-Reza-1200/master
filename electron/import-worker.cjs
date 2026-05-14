@@ -293,7 +293,13 @@ async function extractPdfVisualData(filePath, buffer, userData) {
     await new Promise((resolve) => setImmediate(resolve))
   }
 
-  return { text: visualPages.join('\n\n').trim(), exhibitPhotos, signaturePhoto }
+  let pdfKeywords = ''
+  try {
+    const parsed = await pdfParse(buffer)
+    pdfKeywords = parsed.info?.Keywords || ''
+  } catch {}
+  const visualText = visualPages.join('\n\n').trim()
+  return { text: pdfKeywords ? `${pdfKeywords}\n\n${visualText}` : visualText, exhibitPhotos, signaturePhoto }
 }
 
 const WIN1252 = {
